@@ -1,3 +1,7 @@
+## -> This fork aim to test the Pillow approach described below <-
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 # Python-Tkinter-Game-of-Life
 An interactive Conway's Game of Life with a GUI, built in Python using only Tkinter.
 

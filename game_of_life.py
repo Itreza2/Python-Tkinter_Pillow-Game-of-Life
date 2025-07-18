@@ -5,6 +5,7 @@ from tkinter import ttk, colorchooser
 from random import getrandbits
 from time import perf_counter
 from colorsys import rgb_to_hsv, hsv_to_rgb
+from PIL import Image, ImageTk
 
 
 class Tooltip:
@@ -123,58 +124,49 @@ def get_random_color() -> str:
     return f"#{getrandbits(8):02x}{getrandbits(8):02x}{getrandbits(8):02x}"
 
 
-class Cell:
-    """Handles cell rendering on the canvas.
+class Grid:
+    """Handles cells rendering on the canvas as a single PhotoImage.
 
     Requires class attributes `canvas`, `cell_size`, and `color_map` to
     be set before instantiation.
     """
-
     canvas: tk.Canvas | None = None
     cell_size: int | None = None
     color_map: dict[int, str] | None = None
 
     HIGHLIGHT_COLOR_ADJUST = 0.25  # range: [0, 1]
 
-    def __init__(self, row: int, col: int) -> None:
-        """Create a dead cell on the canvas."""
-        self.color = self.color_map[0]
-        self.highlighted = False
+    def __init__(self, num_rows : int, num_column : int):
+        """Create a new grid image with the given dimensions"""
+        self.grid_content : list[tuple[int, int, int]] = [self.hex_to_rgb(self.color_map[0])] * (num_column * num_rows)
+        self.image : Image.Image = Image.new('RGB', (num_column, num_rows))
+        self.printable : ImageTk.PhotoImage = None
 
-        self.cell_id = self.canvas.create_rectangle(
-            col * self.cell_size,
-            row * self.cell_size,
-            (col + 1) * self.cell_size,
-            (row + 1) * self.cell_size,
-            fill=self.color,
-            width=0)
+    def __print(self) -> None :
+        """Print itself on the canvas"""
+        self.printable = ImageTk.PhotoImage(self.image.resize(
+            (self.image.width * Grid.cell_size, self.image.height * Grid.cell_size), Image.Resampling.BOX
+            ))
+        Grid.canvas.create_image(0, 0, image = self.printable, anchor = 'nw')
 
-    def set_state(self, new_state: int) -> None:
-        """Set the state of the cell by coloring it accordingly."""
-        self.color = self.color_map[new_state]
+    def hex_to_rgb(self, hex_color: str) -> tuple[int, int, int]: #Too lazy for something less stupid
+        """Convert a hex color '#rrggbb' to an (r, g, b) tuple."""
+        return tuple(int(hex_color[i + 1 : i + 3], 16) for i in (0, 2, 4))
 
-        if self.highlighted:
-            self.prehighlight_color = self.color
-            self.color = adjust_color_brightness(self.color,
-                                                 self.HIGHLIGHT_COLOR_ADJUST)
+    def update_all_cells(self, cell_states: list[list[int]]) -> None :
+        """Update the state of each pixel according to a given 2D list"""
+        for y in range(len(cell_states)):
+            for x in range(len(cell_states[y])):
+                self.grid_content[y * self.image.width + x] = self.hex_to_rgb(self.color_map[cell_states[y][x]])
+        self.image.putdata(self.grid_content)
+        self.__print()
 
-        self.canvas.itemconfigure(self.cell_id, fill=self.color)
-
-    def update_highlight(self, new_highlight_state: bool) -> None:
-        """Highlight or unhighlight the cell."""
-        if new_highlight_state:
-            self.prehighlight_color = self.color
-            self.color = adjust_color_brightness(self.color,
-                                                 self.HIGHLIGHT_COLOR_ADJUST)
-        else:
-            self.color = self.prehighlight_color
-
-        self.canvas.itemconfigure(self.cell_id, fill=self.color)
-        self.highlighted = new_highlight_state
-
-    def undraw(self) -> None:
-        """Remove the cell from the canvas."""
-        self.canvas.delete(self.cell_id)
+    def update_given_cells(self, cells: list[tuple[int, int]], state: bool) -> None:
+        """Update a given list of pixels to a given state"""
+        for cell in cells:
+            self.grid_content[cell[0] * self.image.width + cell[1]] = self.hex_to_rgb(self.color_map[state])
+        self.image.putdata(self.grid_content)
+        self.__print()
 
 
 class Model:
@@ -402,15 +394,12 @@ class View(tk.Tk):
         self._create_grid_lines()
 
     def _create_cells(self) -> None:
-        """Create the cells on the canvas."""
-        Cell.canvas = self.canvas
-        Cell.cell_size = self.cell_size
-        Cell.color_map = self.color_map
+        """Create the Grid object for cells rendering on the canvas."""
+        Grid.canvas = self.canvas
+        Grid.cell_size = self.cell_size
+        Grid.color_map = self.color_map
 
-        self.cells = [[None] * self.num_cols for _ in range(self.num_rows)]
-        for row in range(self.num_rows):
-            for col in range(self.num_cols):
-                self.cells[row][col] = Cell(row, col)
+        self.cells = Grid(self.num_rows, self.num_cols)
 
     def _make_ui(self) -> None:
         """Create the UI on the right of the canvas."""
@@ -629,30 +618,23 @@ class View(tk.Tk):
 
         dead_cell_color_rgb = hex_to_rgb(self.dead_cell_color)
         live_cell_color_rgb = hex_to_rgb(self.live_cell_color)
-
         for cell_state in range(1, self.live_state):
             t = cell_state / self.live_state  # Interpolation ratio
             interpolated_color = tuple(
                 int(a + (b - a) * t)
                 for a, b in zip(dead_cell_color_rgb, live_cell_color_rgb))
-
             self.color_map[cell_state] = rgb_to_hex(interpolated_color)
 
-        Cell.color_map = self.color_map
+        Grid.color_map = self.color_map
 
     def update_all_cells(self, cell_states: list[list[int]]) -> None:
         """Update the state of all cells based on a 2D list."""
-        for row in range(self.num_rows):
-            for col in range(self.num_cols):
-                cell = self.cells[row][col]
-                cell.set_state(cell_states[row][col])
+        self.cells.update_all_cells(cell_states)
 
     def update_given_cells(self, cells: list[tuple[int, int]], state: bool
                            ) -> None:
         """Update the state of the given cells based on coordinates."""
-        for row, col in cells:
-            cell = self.cells[row][col]
-            cell.set_state(self.live_state if state else 0)
+        self.cells.update_given_cells(cells, state)
 
     def change_cells_color(self, state: bool, color: str) -> None:
         """Change the color of dead or live cells."""
@@ -662,7 +644,7 @@ class View(tk.Tk):
             self.dead_cell_color = color
 
         self._precompute_color_map()
-        Cell.color_map = self.color_map
+        Grid.color_map = self.color_map
 
     def update_grid_lines_color(self) -> None:
         """Update the color of grid lines.
@@ -677,9 +659,7 @@ class View(tk.Tk):
     def set_cells_highlight(self, cells: list[tuple[int, int]], state: bool
                                ) -> None:
         """Highlight or unhighlight given cells."""
-        for row, col in cells:
-            cell = self.cells[row][col]
-            cell.update_highlight(state)
+        pass
 
     def adjust_grid_size(self, new_num_rows: int, new_num_cols: int) -> None:
         """Add or remove cells to fit into the new canvas space.
@@ -692,30 +672,7 @@ class View(tk.Tk):
         self.num_rows = new_num_rows
         self.num_cols = new_num_cols
 
-        # Adjust rows
-        if new_num_rows > old_num_rows:
-            for row in range(old_num_rows, new_num_rows):
-                self.cells.append([None] * old_num_cols)
-                for col in range(old_num_cols):
-                    self.cells[row][col] = Cell(row, col)
-
-        elif new_num_rows < old_num_rows:
-            for row in range(old_num_rows - 1, new_num_rows - 1, -1):
-                for col in range(old_num_cols):
-                    self.cells[row][col].undraw()
-            self.cells = self.cells[:new_num_rows]
-
-        # Adjust cols
-        if new_num_cols > old_num_cols:
-            for row in range(new_num_rows):
-                for col in range(old_num_cols, new_num_cols):
-                    self.cells[row].append(Cell(row, col))
-
-        elif new_num_cols < old_num_cols:
-            for row in range(new_num_rows):
-                for col in range(old_num_cols - 1, new_num_cols - 1, -1):
-                    self.cells[row][col].undraw()
-                self.cells[row] = self.cells[row][:new_num_cols]
+        self.cells = Grid(self.num_rows, self.num_cols)
 
         self.adjust_grid_lines()
 
@@ -734,7 +691,6 @@ class View(tk.Tk):
                                    (row + 1) * self.cell_size)
 
         # Remove/add cells
-        Cell.cell_size = self.cell_size
         self.adjust_grid_size(new_num_rows, new_num_cols)
 
     def _create_grid_lines(self) -> None:
@@ -863,7 +819,7 @@ class Controller:
 
     MIN_FPS = 1
     MAX_FPS = 60
-    MIN_CELL_SIZE = 10
+    MIN_CELL_SIZE = 1
     MAX_CELL_SIZE = 100
 
     def __init__(self) -> None:
