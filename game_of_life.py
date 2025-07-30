@@ -133,6 +133,7 @@ class Grid:
     canvas: tk.Canvas | None = None
     cell_size: int | None = None
     color_map: dict[int, str] | None = None
+    blur : bool = False
 
     HIGHLIGHT_COLOR_ADJUST = 0.25  # range: [0, 1]
 
@@ -144,8 +145,9 @@ class Grid:
 
     def __print(self) -> None :
         """Print itself on the canvas"""
+        resamplingMethod = (Image.Resampling.BICUBIC if self.blur else Image.Resampling.BOX)
         self.printable = ImageTk.PhotoImage(self.image.resize(
-            (self.image.width * Grid.cell_size, self.image.height * Grid.cell_size), Image.Resampling.BOX
+            (self.image.width * Grid.cell_size, self.image.height * Grid.cell_size), resamplingMethod
             ))
         Grid.canvas.create_image(0, 0, image = self.printable, anchor = 'nw')
 
@@ -391,7 +393,6 @@ class View(tk.Tk):
         self.columnconfigure(0, weight=1)
 
         self._create_cells()
-        self._create_grid_lines()
 
     def _create_cells(self) -> None:
         """Create the Grid object for cells rendering on the canvas."""
@@ -517,9 +518,9 @@ class View(tk.Tk):
                                           text="Dead Cell Color")
         dead_cell_color_label.grid(row=0, column=1, sticky="w")
 
-        # Grid checkbutton
-        self.grid_checkbutton = ttk.Checkbutton(appearance_frame, text="Grid")
-        self.grid_checkbutton.grid(row=0, column=1, sticky="w")
+        # Blur checkbutton
+        self.blur_checkbutton = ttk.Checkbutton(appearance_frame, text="Blur")
+        self.blur_checkbutton.grid(row=0, column=1, sticky="w")
 
         # Trace checkbutton
         self.trace_checkbutton = ttk.Checkbutton(appearance_frame, text="Trace")
@@ -646,16 +647,6 @@ class View(tk.Tk):
         self._precompute_color_map()
         Grid.color_map = self.color_map
 
-    def update_grid_lines_color(self) -> None:
-        """Update the color of grid lines.
-
-        The color of grid lines is in the middle of the dead and live
-        cell colors.
-        """
-        for line in self.grid_lines:
-            self.canvas.itemconfig(line,
-                                   fill=self.color_map[self.live_state // 2])
-
     def set_cells_highlight(self, cells: list[tuple[int, int]], state: bool
                                ) -> None:
         """Highlight or unhighlight given cells."""
@@ -674,64 +665,18 @@ class View(tk.Tk):
 
         self.cells = Grid(self.num_rows, self.num_cols)
 
-        self.adjust_grid_lines()
-
     def adjust_cell_size(self, new_num_rows: int, new_num_cols: int,
                          new_cell_size: int) -> None:
         """Adjust the cell size."""
         self.cell_size = new_cell_size
-
-        # Move existing cells
-        for row in range(self.num_rows):
-            for col in range(self.num_cols):
-                self.canvas.coords(self.cells[row][col].cell_id,
-                                   col * self.cell_size,
-                                   row * self.cell_size,
-                                   (col + 1) * self.cell_size,
-                                   (row + 1) * self.cell_size)
+        Grid.cell_size = new_cell_size
 
         # Remove/add cells
         self.adjust_grid_size(new_num_rows, new_num_cols)
 
-    def _create_grid_lines(self) -> None:
-        """Create grid lines, either visible or hidden."""
-        state = "normal" if self.grid else "hidden"
-
-        # Draw vertical lines
-        for col in range(self.num_cols):
-            line_id = self.canvas.create_line(
-                col * self.cell_size,
-                0,
-                col * self.cell_size,
-                self.num_rows * self.cell_size,
-                fill=self.color_map[self.live_state // 2],
-                state=state)
-            self.grid_lines.append(line_id)
-
-        # Draw horizontal lines
-        for row in range(self.num_rows):
-            line_id = self.canvas.create_line(
-                0,
-                row * self.cell_size,
-                self.num_cols * self.cell_size,
-                row * self.cell_size,
-                fill=self.color_map[self.live_state // 2],
-                state=state)
-            self.grid_lines.append(line_id)
-
-    def toggle_grid_lines(self) -> None:
-        """Turn on or off the grid lines."""
-        self.grid = not self.grid
-        state = "normal" if self.grid else "hidden"
-        for grid_line_id in self.grid_lines:
-            self.canvas.itemconfigure(grid_line_id, state=state)
-
-    def adjust_grid_lines(self) -> None:
-        """Add or remove grid lines to fit into the new canvas space."""
-        while self.grid_lines:
-            self.canvas.delete(self.grid_lines.pop())
-        
-        self._create_grid_lines()
+    def toggle_blur(self) -> None:
+        """Turn on or off the blur effect."""
+        Grid.blur = (False if Grid.blur else True)
 
     def create_help_window(self) -> None:
         """Create a help window with rules and keybinds.
@@ -891,7 +836,7 @@ class Controller:
         self.view.bind("<c>", self.clear)
         self.view.bind("<r>", self.randomize)
         self.view.bind("<w>", self.toggle_wrap)
-        self.view.bind("<g>", self.toggle_grid)
+        self.view.bind("<g>", self.toggle_blur)
         self.view.bind("<t>", self.toggle_trace)
         self.view.bind("<Escape>", lambda event: self.view.destroy())
 
@@ -900,7 +845,7 @@ class Controller:
         self.view.clear_button.config(underline=0)
         self.view.randomize_button.config(underline=0)
         self.view.wrap_checkbutton.config(underline=5)
-        self.view.grid_checkbutton.config(underline=0)
+        self.view.blur_checkbutton.config(underline=0)
         self.view.trace_checkbutton.config(underline=0)
 
         # Disable focus state for proper space behavior
@@ -909,7 +854,7 @@ class Controller:
         self.view.clear_button.config(takefocus=False)
         self.view.randomize_button.config(takefocus=False)
         self.view.wrap_checkbutton.config(takefocus=False)
-        self.view.grid_checkbutton.config(takefocus=False)
+        self.view.blur_checkbutton.config(takefocus=False)
         self.view.trace_checkbutton.config(takefocus=False)
         self.view.help_button.config(takefocus=False)
         self.view.exit_button.config(takefocus=False)
@@ -963,8 +908,8 @@ class Controller:
 
         # Grid checkbutton
         self.grid_checkbutton_var = tk.BooleanVar(value=self.grid)
-        self.view.grid_checkbutton.config(variable=self.grid_checkbutton_var,
-                                          command=self.toggle_grid)
+        self.view.blur_checkbutton.config(variable=self.grid_checkbutton_var,
+                                          command=self.toggle_blur)
 
         # Trace checkbutton
         self.trace_checkbutton_var = tk.BooleanVar(value=self.trace)
@@ -1083,10 +1028,10 @@ class Controller:
 
             self.view.update_grid_lines_color()
 
-    def toggle_grid(self, event: tk.Event | None = None) -> None:
+    def toggle_blur(self, event: tk.Event | None = None) -> None:
         """Toggle the grid on or off."""
         self.grid = not self.grid
-        self.view.toggle_grid_lines()
+        self.view.toggle_blur()
         self.grid_checkbutton_var.set(self.grid)
 
     def toggle_trace(self, event: tk.Event | None = None) -> None:
